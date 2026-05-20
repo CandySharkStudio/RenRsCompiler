@@ -7,7 +7,7 @@ const setFile = util.setFile;
 const getFile = util.getFile;
 const print = util.print;
 const luaParser = @import("parser.zig").parseLuaFile;
-const copyast = @import("ast.zig").ast;
+const ast = @import("ast.zig");
 fn panicHandler(msg: []const u8, ret_addr: ?usize) noreturn {
     @branchHint(.cold);
     print("Error: {s}\n", .{msg});
@@ -112,11 +112,11 @@ pub fn main() !void {
             if (noquiet) print("已读取到 main.lua 文件，正在合并 Lua 文件...\n", .{});
             const lua_par: []const u8 = try luaParser(allocator, lua_file);
             if (noquiet) print("Lua 文件已合并，正在生成 AST...\n", .{});
-            const lua_out = try copyast(allocator, lua_par);
-            if (noquiet) print("AST 生成完毕！已找到 {} 个 Resource 资源，正在流式加密并写出文件中...\n", .{lua_out.binary_name.items.len});
+            try ast.ast(allocator, lua_par);
+            if (noquiet) print("AST 生成完毕！已找到 {} 个 Resource 资源，正在流式加密并写出文件中...\n", .{ast.BINARY.items.len});
             const out_file = try std.fs.cwd().createFile(output, .{});
             defer out_file.close();
-            try encrypt.streamEncryptFiles(allocator, out_file, lua_out, real_key, iv1, iv2, iv3);
+            try encrypt.streamEncryptFiles(allocator, out_file, real_key, iv1, iv2, iv3);
             print("写出文件完成！\n", .{});
             if (!manual_key) print("你的 AES 密钥是：{s}\n请妥善保管好你的密钥。不要随意上传或者忘记了！！建议保存到本地！\n", .{aes_key});
         }

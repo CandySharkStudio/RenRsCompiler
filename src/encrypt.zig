@@ -1,7 +1,7 @@
 const std = @import("std");
 const stripLuaComments = @import("parser.zig").stripLuaComments;
 const print = @import("util.zig").print;
-const ResultStruct = @import("ast.zig").ResultStruct;
+const ast = @import("ast.zig");
 
 const Aes256 = std.crypto.core.aes.Aes256;
 
@@ -98,14 +98,13 @@ pub fn generateKeyBase64(allocator: std.mem.Allocator) ![]const u8 {
 pub fn streamEncryptFiles(
     allocator: std.mem.Allocator,
     out_file: std.fs.File,
-    files: ResultStruct,
     key: [32]u8,
     iv1: [16]u8,
     iv2: [16]u8,
     iv3: [16]u8,
 ) !void {
     // 1. 将 CopywritingStruct 序列化为 JSON 字符串
-    const json_buf = std.json.fmt(files.copywriting, .{});
+    const json_buf = std.json.fmt(ast.AST, .{});
     var string_allocator: std.io.Writer.Allocating = try .initCapacity(allocator, std.math.maxInt(u8));
     defer string_allocator.deinit();
     var string_writer = string_allocator.writer;
@@ -117,11 +116,14 @@ pub fn streamEncryptFiles(
     // 2. 预先获取所有二进制文件的大小 (用于第一阶段写入长度)
     var bin_infos = try std.ArrayList(struct { name: []const u8, size: u64 }).initCapacity(allocator, std.math.maxInt(u8));
     defer bin_infos.deinit(allocator);
-    for (files.binary_name.items) |bin_name| {
-        const bin_file = try std.fs.cwd().openFile(bin_name, .{});
+    for (ast.BINARY.items) |bin_path| {
+        const bin_file = std.fs.cwd().openFile(bin_path, .{}) catch {
+            print("无法读取文件：{s}！\n请确保你有足够的权限或者文件存在！\n", .{bin_path});
+            return error.FileNotFound;
+        };
         defer bin_file.close();
         const stat = try bin_file.stat();
-        try bin_infos.append(allocator, .{ .name = bin_name, .size = stat.size });
+        try bin_infos.append(allocator, .{ .name = bin_path, .size = stat.size });
     }
 
     // 3. 计算第一段密文长度

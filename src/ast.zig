@@ -1,5 +1,6 @@
 const std = @import("std");
 const zlua = @import("zlua");
+const print = @import("util.zig").print;
 const Lua = zlua.Lua;
 pub const CopywritingStruct = struct {
     // 全局定义
@@ -86,49 +87,43 @@ pub const CopywritingStruct = struct {
         try jw.endObject();
     }
 };
-pub const ResultStruct = struct {
-    binary_name: std.ArrayList([]const u8),
-    copywriting: CopywritingStruct,
-    pub fn jsonStringify(self: @This(), jw: anytype) !void {
-        try jw.beginObject();
-
-        // 序列化 binary_name
-        try jw.objectField("binary_name");
-        try jw.beginArray();
-        for (self.binary_name.items) |name| {
-            try jw.write(name);
-        }
-        try jw.endArray();
-
-        // 序列化 copywriting
-        // 因为 CopywritingStruct 已经实现了 jsonStringify，这里直接 write 即可
-        try jw.objectField("copywriting");
-        try jw.write(self.copywriting);
-
-        try jw.endObject();
-    }
-};
-var copywriting_doc: ResultStruct = undefined;
-
+pub var AST: CopywritingStruct = undefined;
+pub var BINARY: std.ArrayList([]const u8) = undefined;
+fn lua_resource(lua: *Lua) i32 {
+    const allocator = lua.allocator();
+    const path_ref = lua.toString(1) catch @panic("Cannot read funcname Resource first argument! please try again!");
+    const mime_ref = lua.toString(2) catch @panic("Cannot read funcname Resource second argument! please try again!");
+    const path = allocator.dupe(u8, path_ref) catch unreachable;
+    const mime = allocator.dupe(u8, mime_ref) catch unreachable;
+    // std.debug.print("{s}", .{path});
+    BINARY.append(allocator, path) catch unreachable;
+    AST.resource.put(path, std.fmt.allocPrint(allocator, "data:{s};base64,{s}", .{ mime, path }) catch unreachable) catch unreachable;
+    _ = lua.pushString(std.fmt.allocPrint(allocator, "<g-resource>{s}</g-resource>", .{path}) catch unreachable);
+    return 1;
+}
 pub fn ast(
     allocator: std.mem.Allocator,
     lua_content: []const u8,
-) !ResultStruct {
+) !void {
     var lua = try Lua.init(allocator);
     defer lua.deinit();
-    copywriting_doc = ResultStruct{
-        .binary_name = try std.ArrayList([]const u8).initCapacity(allocator, std.math.maxInt(u8)),
-        .copywriting = CopywritingStruct{
-            .define = std.StringHashMap(std.json.Value).init(allocator),
-            .resource = std.StringHashMap([]const u8).init(allocator),
-            .translate = std.StringHashMap(std.StringHashMap([]const u8)).init(allocator),
-            .style = std.StringHashMap([]const u8).init(allocator),
-            .components = try std.ArrayList(std.StringHashMap(std.json.Value)).initCapacity(allocator, std.math.maxInt(u8)),
-            .copywriting = .null,
-        },
+    AST = CopywritingStruct{
+        .define = std.StringHashMap(std.json.Value).init(allocator),
+        .resource = std.StringHashMap([]const u8).init(allocator),
+        .translate = std.StringHashMap(std.StringHashMap([]const u8)).init(allocator),
+        .style = std.StringHashMap([]const u8).init(allocator),
+        .components = try std.ArrayList(std.StringHashMap(std.json.Value)).initCapacity(allocator, std.math.maxInt(u8)),
+        .copywriting = .null,
     };
+    BINARY = try std.ArrayList([]const u8).initCapacity(allocator, std.math.maxInt(u8));
     const c_lua_content = try allocator.dupeZ(u8, lua_content);
     defer allocator.free(c_lua_content);
+    const cw = .{
+        .{ "Resource", lua_resource },
+    };
+    inline for (cw) |c| {
+        lua.pushFunction(zlua.wrap(c[1]));
+        lua.setGlobal(c[0]);
+    }
     try lua.doString(c_lua_content);
-    return copywriting_doc;
 }
