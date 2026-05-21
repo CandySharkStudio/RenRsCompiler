@@ -2,7 +2,7 @@ const std = @import("std");
 const zlua = @import("zlua");
 const print = @import("util.zig").print;
 const Lua = zlua.Lua;
-pub const CopywritingStruct = struct {
+pub const ASTStruct = struct {
     // 全局定义
     define: std.StringHashMap(std.json.Value),
     // 部分二进制资源
@@ -87,7 +87,7 @@ pub const CopywritingStruct = struct {
         try jw.endObject();
     }
 };
-pub var AST: CopywritingStruct = undefined;
+pub var AST: ASTStruct = undefined;
 pub var BINARY: std.ArrayList([]const u8) = undefined;
 fn lua_resource(lua: *Lua) i32 {
     const allocator = lua.allocator();
@@ -107,7 +107,7 @@ pub fn ast(
 ) !void {
     var lua = try Lua.init(allocator);
     defer lua.deinit();
-    AST = CopywritingStruct{
+    AST = ASTStruct{
         .define = std.StringHashMap(std.json.Value).init(allocator),
         .resource = std.StringHashMap([]const u8).init(allocator),
         .translate = std.StringHashMap(std.StringHashMap([]const u8)).init(allocator),

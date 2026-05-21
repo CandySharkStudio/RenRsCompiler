@@ -103,7 +103,7 @@ pub fn streamEncryptFiles(
     iv2: [16]u8,
     iv3: [16]u8,
 ) !void {
-    // 1. 将 CopywritingStruct 序列化为 JSON 字符串
+    // 1. 将 ASTStruct 序列化为 JSON 字符串
     const json_buf = std.json.fmt(ast.AST, .{});
     var string_allocator: std.io.Writer.Allocating = try .initCapacity(allocator, std.math.maxInt(u8));
     defer string_allocator.deinit();
