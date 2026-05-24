@@ -1,6 +1,5 @@
 const std = @import("std");
 const zlua = @import("zlua");
-const print = @import("util.zig").print;
 const Lua = zlua.Lua;
 pub const ASTStruct = struct {
     // 全局定义
@@ -89,16 +88,44 @@ pub const ASTStruct = struct {
 };
 pub var AST: ASTStruct = undefined;
 pub var BINARY: std.ArrayList([]const u8) = undefined;
+pub fn gen_random_uuid() [36]u8 {
+    var raw_uuid: [16]u8 = undefined;
+    std.crypto.random.bytes(&raw_uuid);
+    raw_uuid[6] = (raw_uuid[6] & 0x0F) | 0x40;
+    raw_uuid[8] = (raw_uuid[8] & 0x3F) | 0x80;
+    var result: [36]u8 = undefined;
+    const hex = "0123456789abcdef";
+    var out: usize = 0;
+    for (raw_uuid, 0..) |byte, i| {
+        if (i == 4 or i == 6 or i == 8 or i == 10) {
+            result[out] = '-';
+            out += 1;
+        }
+        result[out] = hex[byte >> 4];
+        result[out + 1] = hex[byte & 0x0F];
+        out += 2;
+    }
+    return result;
+}
 fn lua_resource(lua: *Lua) i32 {
     const allocator = lua.allocator();
     const path_ref = lua.toString(1) catch @panic("Cannot read funcname Resource first argument! please try again!");
     const mime_ref = lua.toString(2) catch @panic("Cannot read funcname Resource second argument! please try again!");
     const path = allocator.dupe(u8, path_ref) catch unreachable;
     const mime = allocator.dupe(u8, mime_ref) catch unreachable;
-    // std.debug.print("{s}", .{path});
     BINARY.append(allocator, path) catch unreachable;
     AST.resource.put(path, std.fmt.allocPrint(allocator, "data:{s};base64,{s}", .{ mime, path }) catch unreachable) catch unreachable;
     _ = lua.pushString(std.fmt.allocPrint(allocator, "<g-resource>{s}</g-resource>", .{path}) catch unreachable);
+    return 1;
+}
+fn lua_base64_resource(lua: *Lua) i32 {
+    const allocator = lua.allocator();
+    const uuid_ref = gen_random_uuid();
+    const base_ref = lua.toString(1) catch @panic("Cannot read funcname Base64Resource first argument! please try again!");
+    const uuid = allocator.dupe(u8, &uuid_ref) catch unreachable;
+    const base = allocator.dupe(u8, base_ref) catch unreachable;
+    AST.resource.put(uuid, base) catch unreachable;
+    _ = lua.pushString(std.fmt.allocPrint(allocator, "<g-resource>{s}</g-resource>", .{uuid}) catch unreachable);
     return 1;
 }
 pub fn ast(
@@ -120,6 +147,7 @@ pub fn ast(
     defer allocator.free(c_lua_content);
     const cw = .{
         .{ "Resource", lua_resource },
+        .{ "Base64Resource", lua_base64_resource },
     };
     inline for (cw) |c| {
         lua.pushFunction(zlua.wrap(c[1]));

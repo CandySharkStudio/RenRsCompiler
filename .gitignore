@@ -1,5 +1,8 @@
+# zig output
 zig-out/
 .zig-cache/
+zig-pkg/
 
+# executable file
 *.pdb
 *.exe
