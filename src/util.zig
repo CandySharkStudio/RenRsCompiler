@@ -3,6 +3,10 @@ const std = @import("std");
 pub fn eq(a: []const u8, b: []const u8) bool {
     return a.len == b.len and std.mem.eql(u8, a, b);
 }
+
+pub fn fmt(allocator: std.mem.Allocator, comptime msg: []const u8, args: anytype) []const u8 {
+    return std.fmt.allocPrint(allocator, msg, args) catch unreachable;
+}
 // 写出文件
 pub fn setFile(path: []const u8, content: []const u8) !void {
     const file = try std.fs.cwd().createFile(path, .{});
@@ -13,8 +17,8 @@ pub fn setFile(path: []const u8, content: []const u8) !void {
 pub fn print(comptime msg: []const u8, args: anytype) void {
     var buffer: [1024]u8 = undefined;
     var writer = std.fs.File.stdout().writer(&buffer);
-    writer.interface.print(msg, args) catch {};
-    writer.interface.flush() catch {};
+    writer.interface.print(msg, args) catch unreachable;
+    writer.interface.flush() catch unreachable;
 }
 // 输入
 pub fn input() ![]u8 {
@@ -26,4 +30,16 @@ pub fn input() ![]u8 {
 // 读取文件
 pub fn getFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
     return try std.fs.cwd().readFileAlloc(allocator, path, std.math.maxInt(usize));
+}
+
+pub fn printJson(allocator: std.mem.Allocator, v: anytype) void {
+    const json_buf = std.json.fmt(v, .{});
+    var string_allocator = std.io.Writer.Allocating.initCapacity(allocator, std.math.maxInt(u8)) catch unreachable;
+    defer string_allocator.deinit();
+    var string_writer = string_allocator.writer;
+    json_buf.format(&string_writer) catch unreachable;
+
+    const text_plain = string_writer.buffered();
+
+    print("{s}\n", .{text_plain});
 }

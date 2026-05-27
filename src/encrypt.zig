@@ -105,12 +105,10 @@ pub fn streamEncryptFiles(
 ) !void {
     // 1. 将 ASTStruct 序列化为 JSON 字符串
     const json_buf = std.json.fmt(ast.AST, .{});
-    var string_allocator: std.io.Writer.Allocating = try .initCapacity(allocator, std.math.maxInt(u8));
-    defer string_allocator.deinit();
-    var string_writer = string_allocator.writer;
-    try json_buf.format(&string_writer);
-
-    const text_plain = string_writer.buffered();
+    var buffer: [1024]u8 = undefined;
+    var writer = std.fs.File.stdout().writer(&buffer).interface;
+    try json_buf.format(&writer);
+    const text_plain = writer.buffered();
     const text_plain_len: u32 = @intCast(text_plain.len);
 
     // 2. 预先获取所有二进制文件的大小 (用于第一阶段写入长度)

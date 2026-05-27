@@ -55,6 +55,7 @@ fn readStringLiteral(chars: []const u8, idx: *usize) anyerror![]const u8 {
     idx.* += idx2 + 1;
     return c[0..idx2];
 }
+// 获取 embedLuaFile 的参数
 fn getEmbedArg(line: []const u8) anyerror![]const u8 {
     const pos = try findWord(line, EMBED_FUNCTION);
     var chars = line[pos + EMBED_FUNCTION.len ..];
@@ -77,6 +78,7 @@ fn getEmbedArg(line: []const u8) anyerror![]const u8 {
     return filename;
 }
 
+// 将 main.lua 里面的所有 embedLuaFile 全部转换成原本的代码，最终返回字符串！
 pub fn parseLuaFile(
     allocator: std.mem.Allocator,
     lua_content: []const u8,

@@ -1,6 +1,8 @@
 const std = @import("std");
 const zlua = @import("zlua");
+const util = @import("util.zig");
 const Lua = zlua.Lua;
+
 pub const ASTStruct = struct {
     // 全局定义
     define: std.StringHashMap(std.json.Value),
@@ -85,10 +87,19 @@ pub const ASTStruct = struct {
 
         try jw.endObject();
     }
+    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
+        self.define.deinit();
+        self.components.deinit(allocator);
+        self.resource.deinit();
+        self.style.deinit();
+        self.translate.deinit();
+        allocator.free(self.copywriting);
+    }
 };
 pub var AST: ASTStruct = undefined;
 pub var BINARY: std.ArrayList([]const u8) = undefined;
-pub fn gen_random_uuid() [36]u8 {
+
+fn gen_random_uuid() [36]u8 {
     var raw_uuid: [16]u8 = undefined;
     std.crypto.random.bytes(&raw_uuid);
     raw_uuid[6] = (raw_uuid[6] & 0x0F) | 0x40;
@@ -107,26 +118,115 @@ pub fn gen_random_uuid() [36]u8 {
     }
     return result;
 }
-fn lua_resource(lua: *Lua) i32 {
+
+const ASTError = error{
+    InvalidArgumentCount,
+    UnsupportedTypeError,
+    MixedTableKeys,
+};
+
+fn luaValueToJson(allocator: std.mem.Allocator, lua: *Lua, index: i32) ASTError!std.json.Value {
+    switch (lua.typeOf(index)) {
+        .boolean => {
+            return .{ .bool = lua.toBoolean(index) };
+        },
+        .number => {
+            if (lua.isInteger(index)) {
+                return .{ .integer = lua.toInteger(index) catch return error.UnsupportedTypeError };
+            } else {
+                return .{ .float = lua.toNumber(index) catch return error.UnsupportedTypeError };
+            }
+        },
+        .nil, .none => {
+            return .null;
+        },
+        .string => {
+            const str_ref = lua.toString(index) catch return error.UnsupportedTypeError;
+            const str = allocator.dupe(u8, str_ref) catch unreachable;
+            if (util.eq(str, "nil") or util.eq(str, "null")) {
+                allocator.free(str);
+                return .null;
+            } else {
+                return .{ .string = str };
+            }
+        },
+        .table => {
+            return try luaTableToJson(allocator, lua, index);
+        },
+        else => return error.UnsupportedTypeError,
+    }
+}
+fn luaTableToJson(allocator: std.mem.Allocator, lua: *Lua, index: i32) ASTError!std.json.Value {
+    var is_array = false;
+    var is_object = false;
+    var json_object = std.json.ObjectMap.init(allocator);
+    errdefer json_object.deinit();
+    var json_array = std.json.Array.init(allocator);
+    errdefer json_array.deinit();
+
+    lua.pushNil();
+    while (lua.next(index)) {
+        const key = lua.typeOf(-2);
+        if (key == .number and lua.isInteger(-2)) {
+            is_array = true;
+            json_array.append(try luaValueToJson(allocator, lua, -1)) catch unreachable;
+        } else if (key == .string) {
+            is_object = true;
+            const str_ref = lua.toString(-2) catch return error.UnsupportedTypeError;
+            const str = allocator.dupe(u8, str_ref) catch unreachable;
+            const val = try luaValueToJson(allocator, lua, -1);
+            json_object.put(str, val) catch unreachable;
+        } else {
+            lua.pop(1);
+            return error.UnsupportedTypeError;
+        }
+        if (is_array and is_object) {
+            return error.MixedTableKeys;
+        }
+        lua.pop(1);
+    }
+    if (!is_array and !is_object) {
+        is_object = true;
+    }
+    if (is_array) {
+        json_object.deinit();
+        return .{ .array = json_array };
+    } else {
+        json_array.deinit();
+        return .{ .object = json_object };
+    }
+}
+// fn luaTableToJson(allocator: std.mem.Allocator, lua: *Lua, index: i32) anyerror!std.json.Value {}
+fn luaResource(lua: *Lua) i32 {
     const allocator = lua.allocator();
-    const path_ref = lua.toString(1) catch @panic("Cannot read funcname Resource first argument! please try again!");
-    const mime_ref = lua.toString(2) catch @panic("Cannot read funcname Resource second argument! please try again!");
+    const path_ref = lua.toString(1) catch @panic("Cannot read funcname Resource first argument to String! please try again!");
     const path = allocator.dupe(u8, path_ref) catch unreachable;
+    const mime_ref = lua.toString(2) catch @panic(util.fmt(allocator, "Cannot read funcname Resource second argument to String by \"{s}\"! please try again!", .{path}));
     const mime = allocator.dupe(u8, mime_ref) catch unreachable;
     BINARY.append(allocator, path) catch unreachable;
     AST.resource.put(path, std.fmt.allocPrint(allocator, "data:{s};base64,{s}", .{ mime, path }) catch unreachable) catch unreachable;
     _ = lua.pushString(std.fmt.allocPrint(allocator, "<g-resource>{s}</g-resource>", .{path}) catch unreachable);
     return 1;
 }
-fn lua_base64_resource(lua: *Lua) i32 {
+fn luaBase64Resource(lua: *Lua) i32 {
     const allocator = lua.allocator();
     const uuid_ref = gen_random_uuid();
-    const base_ref = lua.toString(1) catch @panic("Cannot read funcname Base64Resource first argument! please try again!");
     const uuid = allocator.dupe(u8, &uuid_ref) catch unreachable;
+    const base_ref = lua.toString(1) catch @panic("Cannot read funcname Base64Resource first argument to String! please try again!");
     const base = allocator.dupe(u8, base_ref) catch unreachable;
     AST.resource.put(uuid, base) catch unreachable;
     _ = lua.pushString(std.fmt.allocPrint(allocator, "<g-resource>{s}</g-resource>", .{uuid}) catch unreachable);
     return 1;
+}
+fn luaSetDefine(lua: *Lua) i32 {
+    const allocator = lua.allocator();
+    const key_ref = lua.toString(1) catch @panic("Cannot read funcname SetDefine first argument to String! please try again!");
+    const key = allocator.dupe(u8, key_ref) catch unreachable;
+    const value = luaValueToJson(allocator, lua, 2) catch |err| {
+        @panic(util.fmt(allocator, "Cannot read funcname SetDefine second argument to Allow Type by \"{s}\"! error message: \"{}\"", .{ key, err }));
+    };
+    AST.define.put(key, value) catch unreachable;
+    return 0;
 }
 pub fn ast(
     allocator: std.mem.Allocator,
@@ -146,8 +246,9 @@ pub fn ast(
     const c_lua_content = try allocator.dupeZ(u8, lua_content);
     defer allocator.free(c_lua_content);
     const cw = .{
-        .{ "Resource", lua_resource },
-        .{ "Base64Resource", lua_base64_resource },
+        .{ "Resource", luaResource },
+        .{ "Base64Resource", luaBase64Resource },
+        .{ "SetDefine", luaSetDefine },
     };
     inline for (cw) |c| {
         lua.pushFunction(zlua.wrap(c[1]));

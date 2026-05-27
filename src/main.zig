@@ -13,6 +13,7 @@ fn panicHandler(msg: []const u8, ret_addr: ?usize) noreturn {
     print("Error: {s}\n", .{msg});
     std.debug.defaultPanic(msg, ret_addr);
 }
+
 pub const panic = std.debug.FullPanic(panicHandler);
 const default_aes_key: []const u8 = "Nim3VGmCjDBKMnaDqOX7RrsbP7/bz3zochCDuMuWMNI=";
 fn showHelp() void {
@@ -23,7 +24,7 @@ fn showHelp() void {
         \\       rrc <source>.lua [options]
         \\       rrc [help option]
         \\Commands:
-        \\    init    在当前目录下初始化一个 main.lua 文件！
+        \\    init    在当前目录下初始化一个示例项目！
         \\
         \\Options:
         \\    -o, --output <NAME>.<.rrs>    输出最终编译产物
