@@ -87,14 +87,6 @@ pub const ASTStruct = struct {
 
         try jw.endObject();
     }
-    pub fn deinit(self: @This(), allocator: std.mem.Allocator) void {
-        self.define.deinit();
-        self.components.deinit(allocator);
-        self.resource.deinit();
-        self.style.deinit();
-        self.translate.deinit();
-        allocator.free(self.copywriting);
-    }
 };
 pub var AST: ASTStruct = undefined;
 pub var BINARY: std.ArrayList([]const u8) = undefined;
