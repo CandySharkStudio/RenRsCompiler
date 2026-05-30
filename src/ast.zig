@@ -188,12 +188,47 @@ fn luaTableToJson(allocator: std.mem.Allocator, lua: *Lua, index: i32) ASTError!
         return .{ .object = json_object };
     }
 }
-// fn luaTableToJson(allocator: std.mem.Allocator, lua: *Lua, index: i32) anyerror!std.json.Value {}
+fn luaJsonToTable(lua: *Lua, json: std.json.Value) void {
+    switch (json) {
+        .null => _ = lua.pushString("null"),
+        .bool => |b| lua.pushBoolean(b),
+        .integer => |i| lua.pushInteger(i),
+        .float => |f| lua.pushNumber(f),
+        .number_string => |ns| {
+            if (std.fmt.parseInt(i64, ns, 10) catch null) |int_val| {
+                lua.pushInteger(int_val);
+            } else if (std.fmt.parseFloat(f64, ns) catch null) |float_val| {
+                lua.pushNumber(float_val);
+            } else {
+                lua.pushNil();
+            }
+        },
+        .string => |s| _ = lua.pushString(s),
+        .array => |arr| {
+            lua.createTable(0, @intCast(arr.items.len));
+            const table_idx = lua.absIndex(-1);
+            for (arr.items, 0..) |item, i| {
+                luaJsonToTable(lua, item);
+                lua.rawSetIndex(table_idx, @as(i64, @intCast(i)) + 1);
+            }
+        },
+        .object => |obj| {
+            lua.createTable(0, @intCast(obj.count()));
+            const table_idx = lua.absIndex(-1);
+            var iter = obj.iterator();
+            while (iter.next()) |entry| {
+                _ = lua.pushString(entry.key_ptr.*);
+                luaJsonToTable(lua, entry.value_ptr.*);
+                lua.rawSetTable(table_idx);
+            }
+        },
+    }
+}
 fn luaResource(lua: *Lua) i32 {
     const allocator = lua.allocator();
-    const path_ref = lua.toString(1) catch @panic("Cannot read funcname Resource first argument to String! please try again!");
+    const path_ref = lua.toString(1) catch @panic("Cannot read funcname \"Resource\" first argument to String! please try again!");
     const path = allocator.dupe(u8, path_ref) catch unreachable;
-    const mime_ref = lua.toString(2) catch @panic(util.fmt(allocator, "Cannot read funcname Resource second argument to String by \"{s}\"! please try again!", .{path}));
+    const mime_ref = lua.toString(2) catch @panic(util.fmt(allocator, "Cannot read funcname \"Resource\" second argument to String by \"{s}\"! please try again!", .{path}));
     const mime = allocator.dupe(u8, mime_ref) catch unreachable;
     BINARY.append(allocator, path) catch unreachable;
     AST.resource.put(path, std.fmt.allocPrint(allocator, "data:{s};base64,{s}", .{ mime, path }) catch unreachable) catch unreachable;
@@ -204,7 +239,7 @@ fn luaBase64Resource(lua: *Lua) i32 {
     const allocator = lua.allocator();
     const uuid_ref = gen_random_uuid();
     const uuid = allocator.dupe(u8, &uuid_ref) catch unreachable;
-    const base_ref = lua.toString(1) catch @panic("Cannot read funcname Base64Resource first argument to String! please try again!");
+    const base_ref = lua.toString(1) catch @panic("Cannot read funcname \"Base64Resource\" first argument to String! please try again!");
     const base = allocator.dupe(u8, base_ref) catch unreachable;
     AST.resource.put(uuid, base) catch unreachable;
     _ = lua.pushString(std.fmt.allocPrint(allocator, "<g-resource>{s}</g-resource>", .{uuid}) catch unreachable);
@@ -212,12 +247,54 @@ fn luaBase64Resource(lua: *Lua) i32 {
 }
 fn luaSetDefine(lua: *Lua) i32 {
     const allocator = lua.allocator();
-    const key_ref = lua.toString(1) catch @panic("Cannot read funcname SetDefine first argument to String! please try again!");
+    const key_ref = lua.toString(1) catch @panic("Cannot read funcname \"SetDefine\" first argument to String! please try again!");
     const key = allocator.dupe(u8, key_ref) catch unreachable;
     const value = luaValueToJson(allocator, lua, 2) catch |err| {
-        @panic(util.fmt(allocator, "Cannot read funcname SetDefine second argument to Allow Type by \"{s}\"! error message: \"{}\"", .{ key, err }));
+        @panic(util.fmt(allocator, "Cannot read funcname \"SetDefine\" second argument to Allow Type by \"{s}\"! error message: \"{}\"", .{ key, err }));
     };
     AST.define.put(key, value) catch unreachable;
+    return 0;
+}
+fn luaSetTranslate(lua: *Lua) i32 {
+    const allocator = lua.allocator();
+    const key_ref = lua.toString(1) catch @panic("Cannot read funcname \"SetTranslate\" first argument to String! please try again!");
+    const key = allocator.dupe(u8, key_ref) catch unreachable;
+    var mv = std.StringHashMap([]const u8).init(allocator);
+    const lv = luaValueToJson(allocator, lua, 2) catch |err| {
+        @panic(util.fmt(allocator, "Cannot read funcname \"SetTranslate\" second argument to Allow Type by \"{s}\"! error message: \"{}\"", .{ key, err }));
+    };
+    if (lv != .object) {
+        @panic(util.fmt(allocator, "Cannot read funcname \"SetTranslate\" second argument to Allow Type by \"{s}\"! error message: CannotConvertToObject", .{key}));
+    }
+    var it = lv.object.iterator();
+    while (it.next()) |en| {
+        const v = en.value_ptr.*;
+        if (v != .string) {
+            @panic(util.fmt(allocator, "Cannot read funcname \"SetTranslate\" second argument to Allow Type by \"{s}\" in \"{s}\"! error message: CannotConvertToString", .{ key, en.key_ptr.* }));
+        }
+        mv.put(en.key_ptr.*, v.string) catch unreachable;
+    }
+    AST.translate.put(key, mv) catch unreachable;
+    return 0;
+}
+fn luaGetDefine(lua: *Lua) i32 {
+    const allocator = lua.allocator();
+    const key_ref = lua.toString(1) catch @panic("Cannot read funcname \"SetTranslate\" first argument to String! please try again!");
+    const key = allocator.dupe(u8, key_ref) catch unreachable;
+    const c = AST.define.get(key);
+    if (c) |v| {
+        luaJsonToTable(lua, v);
+        return 1;
+    } else {
+        @panic(util.fmt(allocator, "Cannot find any value in key: \"{s}\", please check your code and make sure the key is exists!", .{key}));
+    }
+}
+fn luaPrint(lua: *Lua) i32 {
+    const allocator = lua.allocator();
+    const value = luaValueToJson(allocator, lua, 1) catch |err| {
+        @panic(util.fmt(allocator, "Cannot read funcname \"print\" first argument to Allow Type! error message: \"{}\"", .{err}));
+    };
+    util.printJson(value);
     return 0;
 }
 pub fn ast(
@@ -241,6 +318,9 @@ pub fn ast(
         .{ "Resource", luaResource },
         .{ "Base64Resource", luaBase64Resource },
         .{ "SetDefine", luaSetDefine },
+        .{ "SetTranslate", luaSetTranslate },
+        .{ "GetDefine", luaGetDefine },
+        .{ "print", luaPrint },
     };
     inline for (cw) |c| {
         lua.pushFunction(zlua.wrap(c[1]));
